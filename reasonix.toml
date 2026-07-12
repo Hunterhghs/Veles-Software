@@ -1,0 +1,2 @@
+[permissions]
+allow = ["research", "Bash(python3 -c \"import reportlab; print(reportlab.Version)\" 2>&1; python3 -c \"from fpdf import FPDF; print('fpdf available')\" 2>&1; python3 -c \"import weasyprint; print('weasyprint available')\" 2>&1)", "Bash(mkdir -p:*)"]

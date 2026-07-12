@@ -1,0 +1,400 @@
+#!/usr/bin/env python3
+"""
+╔══════════════════════════════════════════════════════════════╗
+║                     V E L E S                                ║
+║     Fable-5 + DeepSeek Hybrid — H Heuristics AI Agent        ║
+║     Architect → Coder → Verifier → Memory pipeline           ║
+╚══════════════════════════════════════════════════════════════╝
+
+Usage:
+    python3 veles new <project-name>           Bootstrap a new project
+    python3 veles seed <project-path>          Seed memory for a project
+    python3 veles design <project-path> [q]    Run Architect design review
+    python3 veles verify <project-path>        Run Verifier quality audit
+    python3 veles pipeline <path> <task>       Run Arch→Code→Verify chain
+    python3 veles run <project-path> <task>    Run full Orchestrator pipeline
+    python3 veles run --bg <path> <task>       Run Orchestrator in background
+    python3 veles mcp <project-path>           Start MCP server (exports tools)
+    python3 veles memory <project-path>        View project memory
+    python3 veles status                       Check Veles system health
+    python3 veles tools                        List all available tools
+
+Examples:
+    python3 veles new my-dashboard
+    python3 veles design . "How would you add dark mode?"
+    python3 veles verify .
+    python3 veles run . "Add a footer with data sources"
+"""
+
+import sys, os, time, subprocess, textwrap
+from pathlib import Path
+
+VELES_DIR = Path(__file__).resolve().parent
+FABLE_DIR = VELES_DIR / "Fable-5"
+sys.path.insert(0, str(FABLE_DIR))
+
+def banner():
+    print("╔══════════════════════════════════════════╗")
+    print("║  VELES — Fable-5 × DeepSeek Hybrid       ║")
+    print("║  H Heuristics AI Agent Pipeline          ║")
+    print("╚══════════════════════════════════════════╝")
+    print()
+
+def check_health():
+    """Verify all Veles components are operational."""
+    from fable_agent.config import FableConfig, resolve_api_key
+    
+    results = {}
+    
+    # 1. API key
+    key = resolve_api_key('openai-compatible')
+    results['DeepSeek API key'] = bool(key)
+    
+    # 2. Config
+    try:
+        config = FableConfig.load(workspace='.')
+        results['Fable config'] = bool(config.api_key)
+    except:
+        results['Fable config'] = False
+    
+    # 3. Provider
+    try:
+        from fable_agent.llm import create_provider
+        p = create_provider(config)
+        results['LLM provider'] = p.model
+    except:
+        results['LLM provider'] = False
+    
+    # 4. Fable-5 version
+    try:
+        ver = subprocess.run(['git','log','--oneline','-1'], cwd=FABLE_DIR, 
+                            capture_output=True, text=True).stdout.strip()
+        results['Fable-5'] = ver[:8] if ver else 'unknown'
+    except:
+        results['Fable-5'] = 'not found'
+    
+    # 5. Sub-agents
+    try:
+        from fable_agent.agents.subagents import SUBAGENT_TYPES
+        results['Sub-agents'] = ', '.join(sorted(SUBAGENT_TYPES))
+    except:
+        results['Sub-agents'] = 'error'
+    
+    # 6. Custom tools
+    try:
+        from fable_agent.tools.hheuristics import register
+        from fable_agent.tools import default_registry
+        reg = default_registry(str(VELES_DIR))
+        reg = register(reg)
+        results['Custom tools'] = f'{len(reg.specs())} total'
+    except:
+        results['Custom tools'] = 'error'
+    
+    # 7. Memory
+    try:
+        from fable_agent.memory import create_memory
+        mem = create_memory('sqlite', VELES_DIR / '.fable' / 'memory')
+        results['Memory store'] = f'{len(mem.recent(limit=20))} entries'
+    except:
+        results['Memory store'] = 'error'
+    
+    # 8. Workflow scripts
+    scripts = ['fable-seed-memory.py', 'fable-architect.py', 'fable-verify.py']
+    results['Workflow scripts'] = ', '.join(
+        f'{s}' for s in scripts if (VELES_DIR / s).exists()
+    )
+    
+    return results
+
+def cmd_status():
+    banner()
+    results = check_health()
+    all_ok = True
+    for name, status in results.items():
+        if isinstance(status, bool):
+            icon = '✅' if status else '❌'
+            if not status: all_ok = False
+            print(f"  {icon} {name}")
+        else:
+            print(f"  📌 {name}: {status}")
+    print()
+    if all_ok:
+        print("  🟢 Veles is fully operational.")
+    else:
+        print("  🔴 Some components need attention.")
+    print(f"\n  Config: {VELES_DIR / 'fable.toml'}")
+    print(f"  Engine: {FABLE_DIR}")
+    print(f"  Model:  deepseek-v4-pro (configured default)")
+
+def cmd_tools():
+    banner()
+    from fable_agent.tools.hheuristics import register
+    from fable_agent.tools import default_registry
+    reg = default_registry(str(VELES_DIR))
+    reg = register(reg)
+    print("  Built-in tools (7):")
+    for s in reg.specs():
+        if s.name not in ('validate_dashboard', 'fetch_data_source', 'market_sizing'):
+            print(f"    • {s.name} — {s.description[:80]}...")
+    print("\n  H Heuristics custom tools (3):")
+    for s in reg.specs():
+        if s.name in ('validate_dashboard', 'fetch_data_source', 'market_sizing'):
+            print(f"    • {s.name} — {s.description[:80]}...")
+
+def cmd_new(name):
+    banner()
+    project_dir = VELES_DIR / name
+    
+    if project_dir.exists():
+        print(f"  ⚠️  Project '{name}' already exists at {project_dir}")
+        return
+    
+    # Create directory
+    project_dir.mkdir(parents=True)
+    
+    # Copy fable.toml
+    import shutil
+    shutil.copy(VELES_DIR / 'fable.toml', project_dir / 'fable.toml')
+    
+    # Create .gitignore
+    (project_dir / '.gitignore').write_text('node_modules/\n.fable/\n.DS_Store\n*.log\n')
+    
+    # Seed memory
+    print(f"  📁 Created {project_dir}")
+    print(f"  🧠 Seeding memory...")
+    
+    from fable_agent.memory import create_memory
+    mem = create_memory('sqlite', project_dir / '.fable' / 'memory')
+    
+    entries = [
+        ('project-fact', f'veles-{name}',
+         f'Veles project: {name}. Built with Fable-5 + DeepSeek hybrid. '
+         'H Heuristics quality standards apply: professional-grade, production-ready, '
+         'pixel-perfect responsive design, accessible, fast-loading.'),
+        ('decision', f'veles-{name}-deploy',
+         'Deploy to Cloudflare Pages as static site. Zero build step for HTML/JS, '
+         'Vite build for React SPAs. Use _headers file for security config.'),
+        ('decision', f'veles-{name}-style',
+         'System font stack. Dark slate (#0f172a) or economist white/red palette. '
+         'Chart.js for visualizations. No heavy frameworks unless needed.'),
+    ]
+    for cat, tags, content in entries:
+        mem.remember(content, category=cat, tags=tags.split('-'))
+    
+    print(f"  ✅ Project '{name}' ready with {len(entries)} memory entries")
+    print(f"  📂 cd {name}")
+    print(f"  🏗️  python3 ../veles design . 'How should I structure this project?'")
+
+def cmd_seed(path_str):
+    project_dir = (VELES_DIR / path_str).resolve()
+    if not project_dir.exists():
+        print(f"❌ Directory not found: {project_dir}")
+        return
+    
+    # Run the seed-memory script
+    script = VELES_DIR / 'fable-seed-memory.py'
+    os.system(f'cd {VELES_DIR} && python3 {script} {project_dir.name} {project_dir}')
+
+def cmd_run(path_str, task, background=False):
+    project_dir = (VELES_DIR / path_str).resolve()
+    if not project_dir.exists():
+        print(f"❌ Directory not found: {project_dir}")
+        return
+    
+    import sys
+    from fable_agent import FableConfig, Orchestrator
+    from fable_agent.memory import create_memory
+    
+    config = FableConfig.load(workspace=str(project_dir))
+    config.api_key = os.environ.get('DEEPSEEK_API_KEY')
+    memory = create_memory(config.memory_backend, config.memory_path)
+    
+    def hook(agent, event, detail):
+        print(f"  [{agent}/{event}] {str(detail)[:120]}", flush=True)
+    
+    orchestrator = Orchestrator(config=config, memory=memory, on_event=hook)
+    
+    print(f"🎯 Running Veles Orchestrator on: {project_dir.name}")
+    print(f"   Task: {task[:100]}...")
+    print()
+    
+    t0 = time.time()
+    try:
+        result = orchestrator.run_task(task)
+        elapsed = time.time() - t0
+        print(f"\n✅ Done in {elapsed:.0f}s (success={result.success}, {result.iterations} iters)")
+        print(f"\n{result.output[:600]}")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+
+def cmd_design(path_str, question=None):
+    project_dir = (VELES_DIR / path_str).resolve()
+    if not project_dir.exists():
+        print(f"❌ Directory not found: {project_dir}")
+        return
+    
+    script = VELES_DIR / 'fable-architect.py'
+    if question:
+        cmd = f'cd {VELES_DIR} && python3 {script} {project_dir} "{question}"'
+    else:
+        cmd = f'cd {VELES_DIR} && python3 {script} {project_dir}'
+    os.system(cmd)
+
+def cmd_verify(path_str):
+    project_dir = (VELES_DIR / path_str).resolve()
+    if not project_dir.exists():
+        print(f"❌ Directory not found: {project_dir}")
+        return
+    
+    script = VELES_DIR / 'fable-verify.py'
+    os.system(f'cd {VELES_DIR} && python3 {script} {project_dir}')
+
+def cmd_pipeline(path_str, task):
+    """Run Architect → Coder → Verifier chain on a single task."""
+    project_dir = (VELES_DIR / path_str).resolve()
+    if not project_dir.exists():
+        print(f"❌ Directory not found: {project_dir}")
+        return
+    
+    from fable_agent import FableConfig
+    from fable_agent.agents.subagents import ArchitectAgent, CoderAgent, VerifierAgent
+    from fable_agent.llm import create_provider
+    from fable_agent.memory import create_memory
+    
+    config = FableConfig.load(workspace=str(project_dir))
+    config.api_key = os.environ.get("DEEPSEEK_API_KEY")
+    config.max_iterations = 15
+    provider = create_provider(config)
+    memory = create_memory(config.memory_backend, config.memory_path)
+    
+    # Load project memory
+    recent = memory.recent(limit=5)
+    mem_ctx = None
+    if recent:
+        mem_ctx = "Project memory:\n" + "\n".join(f"- [{e.category}] {e.content}" for e in recent)
+    
+    banner()
+    print(f"🔄 Veles Pipeline: {project_dir.name}")
+    print(f"   Task: {task[:100]}...")
+    print()
+    
+    # Phase 1: Architect
+    print("🏗️  Phase 1/3: Architect designing approach...", flush=True)
+    t0 = time.time()
+    architect = ArchitectAgent(provider, config)
+    arch_task = f"Explore the workspace. For this task: {task}\n\nProduce a concrete implementation plan. Name the files to change and describe the changes."
+    arch_result = architect.run(arch_task, context=mem_ctx)
+    print(f"   ✅ Architect: {arch_result.iterations} iters, {time.time()-t0:.1f}s", flush=True)
+    
+    # Phase 2: Coder
+    print("💻 Phase 2/3: Coder implementing...", flush=True)
+    t0 = time.time()
+    coder = CoderAgent(provider, config)
+    code_task = f"Implement the following plan:\n\n{arch_result.output[:800]}\n\nOriginal task: {task}"
+    code_result = coder.run(code_task, context=mem_ctx)
+    print(f"   ✅ Coder: {code_result.iterations} iters, {time.time()-t0:.1f}s", flush=True)
+    
+    # Phase 3: Verifier
+    print("🔍 Phase 3/3: Verifier checking...", flush=True)
+    t0 = time.time()
+    verifier = VerifierAgent(provider, config)
+    verify_task = f"Verify the work just completed. Start with PASS or FAIL. The task was: {task}"
+    verify_result = verifier.run(verify_task, context=mem_ctx)
+    print(f"   ✅ Verifier: {verify_result.iterations} iters, {time.time()-t0:.1f}s", flush=True)
+    
+    # Memory
+    memory.remember(f"Pipeline task: {task[:150]} — Outcome: {verify_result.output[:200]}", category="task", tags=["pipeline"])
+    
+    print(f"\n📋 Verifier verdict:")
+    print(verify_result.output[:600])
+
+def cmd_mcp(path_str):
+    """Start the MCP server for a project."""
+    project_dir = (VELES_DIR / path_str).resolve()
+    if not project_dir.exists():
+        print(f"❌ Directory not found: {project_dir}")
+        return
+    
+    banner()
+    print(f"🌐 Starting MCP server for: {project_dir.name}")
+    print(f"   Exports: 7 filesystem tools + 2 memory tools + 1 agent tool + 4 prompts")
+    print(f"   Clients: Claude Code, Cursor, Reasonix, custom scripts")
+    print()
+    print(f"   Run manually:")
+    print(f"   cd Fable-5 && source .venv/bin/activate")
+    print(f"   fable mcp --workspace {project_dir}")
+    print()
+    print(f"   Or add to MCP config:")
+    print(f'   {{"command":"fable","args":["mcp","--workspace","{project_dir}"]}}')
+
+
+def cmd_memory(path_str):
+    project_dir = (VELES_DIR / path_str).resolve()
+    if not project_dir.exists():
+        print(f"❌ Directory not found: {project_dir}")
+        return
+    
+    from fable_agent.memory import create_memory
+    mem = create_memory('sqlite', project_dir / '.fable' / 'memory')
+    entries = mem.recent(limit=20)
+    
+    banner()
+    print(f"  Project: {project_dir.name}")
+    print(f"  Entries: {len(entries)}")
+    print()
+    for e in entries:
+        print(f"  [{e.category}] {e.content[:120]}...")
+        print(f"           tags: {', '.join(e.tags)}")
+        print()
+
+# ═══════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        banner()
+        print("Usage:")
+        print("  python3 veles new <name>          Bootstrap a new project")
+        print("  python3 veles seed <path>         Seed project memory")
+        print("  python3 veles design <path> [q]   Architect design review")
+        print("  python3 veles verify <path>       Pre-push quality audit")
+        print("  python3 veles pipeline <path> <t> Arch->Code->Verify chain")
+        print("  python3 veles run <path> <task>   Full orchestrator pipeline")
+        print("  python3 veles run --bg <path> <t> Orchestrator in background")
+        print("  python3 veles mcp <path>          Start MCP server")
+        print("  python3 veles memory <path>       View project memory")
+        print("  python3 veles status              System health check")
+        print("  python3 veles tools               List all tools")
+        sys.exit(0)
+    
+    cmd = sys.argv[1]
+    
+    if cmd == 'status':
+        cmd_status()
+    elif cmd == 'tools':
+        cmd_tools()
+    elif cmd == 'new' and len(sys.argv) >= 3:
+        cmd_new(sys.argv[2])
+    elif cmd == 'seed' and len(sys.argv) >= 3:
+        cmd_seed(sys.argv[2])
+    elif cmd == 'design' and len(sys.argv) >= 3:
+        q = sys.argv[3] if len(sys.argv) >= 4 else None
+        cmd_design(sys.argv[2], q)
+    elif cmd == 'verify' and len(sys.argv) >= 3:
+        cmd_verify(sys.argv[2])
+    elif cmd == 'run' and len(sys.argv) >= 4:
+        if sys.argv[2] == '--bg' and len(sys.argv) >= 5:
+            cmd_run(sys.argv[3], ' '.join(sys.argv[4:]), background=True)
+        else:
+            cmd_run(sys.argv[2], ' '.join(sys.argv[3:]))
+    elif cmd == 'pipeline' and len(sys.argv) >= 4:
+        cmd_pipeline(sys.argv[2], ' '.join(sys.argv[3:]))
+    elif cmd == 'mcp' and len(sys.argv) >= 3:
+        cmd_mcp(sys.argv[2])
+    elif cmd == 'memory' and len(sys.argv) >= 3:
+        cmd_memory(sys.argv[2])
+    else:
+        print(f"Unknown command: {cmd}")
+        print("Try: python3 veles (no arguments for help)")
+        sys.exit(1)

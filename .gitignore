@@ -1,0 +1,30 @@
+# Veles — Hybrid AI Agent Pipeline
+#
+# Fable-5 × DeepSeek · Assembled in Reasonix · H Heuristics
+#
+# .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reasonix
+.fable/
+.pytest_cache/
+
+# Environment
+.env
+.env.local
